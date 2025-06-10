@@ -79,3 +79,20 @@ def authenticate_user(db: Session, email: str, password: str):
     if not user or not pwd_context.verify(password, user.password):
         return None
     return user
+
+def create_contact(db: Session, contact: schemas.ContactCreate, user_id: int):
+    db_contact = models.Contact(**contact.dict(), user_id=user_id)
+    db.add(db_contact)
+    db.commit()
+    db.refresh(db_contact)
+    return db_contact
+
+def search_contacts(db: Session, user_id: int, first_name=None, last_name=None, email=None):
+    query = db.query(models.Contact).filter(models.Contact.user_id == user_id)
+    if first_name:
+        query = query.filter(models.Contact.first_name.ilike(f"%{first_name}%"))
+    if last_name:
+        query = query.filter(models.Contact.last_name.ilike(f"%{last_name}%"))
+    if email:
+        query = query.filter(models.Contact.email.ilike(f"%{email}%"))
+    return query.all()

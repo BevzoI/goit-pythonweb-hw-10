@@ -3,9 +3,20 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date, timedelta
 from sqlalchemy import extract
+from auth import get_current_user
+from models import User 
 
 from database import SessionLocal, engine
 import models, schemas, crud
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # або вкажи фронтенд
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -75,3 +86,43 @@ def get_upcoming_birthdays(db: Session = Depends(get_db)):
         extract('day', models.Contact.birthday) <= upcoming_date.day
     ).all()
     return contacts
+
+from middleware import setup_middlewares, limiter
+from slowapi.errors import RateLimitExceeded
+from fastapi.responses import JSONResponse
+from fastapi.requests import Request
+from fastapi import status
+
+# Підключення CORS та RateLimit
+setup_middlewares(app)
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"detail": "Rate limit exceeded. Try again later."}
+    )
+
+# Обмеження /users/me — максимум 5 запитів за хвилину
+from auth import get_current_user
+@app.get("/me", dependencies=[Depends(limiter.limit("5/minute"))])
+def read_user_me(current_user=Depends(get_current_user)):
+    return current_user
+
+@app.post("/contacts/", response_model=schemas.ContactOut)
+def create_contact(
+    contact: schemas.ContactCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return crud.create_contact(db, contact, user_id=current_user.id)
+
+@app.get("/contacts/", response_model=List[schemas.ContactOut])
+def get_contacts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    first_name: Optional[str] = Query(None),
+    last_name: Optional[str] = Query(None),
+    email: Optional[str] = Query(None)
+):
+    return crud.search_contacts(db, current_user.id, first_name, last_name, email)
